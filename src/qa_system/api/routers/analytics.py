@@ -21,25 +21,25 @@ router = APIRouter()
 
 @router.get("/dashboard")
 async def get_dashboard_data(db: Session = Depends(get_db)):
-    """ダッシュボード用のデータを取得"""
+    """Get data for dashboard"""
     try:
-        # 基本統計
+        # Basic statistics
         total_lectures = db.query(Lecture).count()
         total_questions = db.query(Question).count()
         total_responses = db.query(StudentResponse).count()
         
-        # 平均正答率
+        # Average correct rate
         avg_correct_rate = db.query(func.avg(Question.correct_rate)).filter(
             Question.correct_rate.isnot(None)
         ).scalar()
         
-        # 最近の活動（過去7日間）
+        # Recent activity (past 7 days)
         week_ago = datetime.now() - timedelta(days=7)
         recent_responses = db.query(StudentResponse).filter(
             StudentResponse.submitted_at >= week_ago
         ).count()
         
-        # 難易度別の統計
+        # Statistics by difficulty
         difficulty_stats = db.query(
             Question.difficulty,
             func.count(Question.id).label('question_count'),
@@ -55,7 +55,7 @@ async def get_dashboard_data(db: Session = Depends(get_db)):
                 "average_correct_rate": round(avg_rate, 1) if avg_rate else 0
             }
         
-        # 質問タイプ別の統計
+        # Statistics by question type
         type_stats = db.query(
             Question.question_type,
             func.count(Question.id).label('question_count'),
@@ -84,29 +84,29 @@ async def get_dashboard_data(db: Session = Depends(get_db)):
         }
         
     except Exception as e:
-        logger.error(f"ダッシュボードデータ取得エラー: {e}")
-        raise HTTPException(status_code=500, detail="ダッシュボードデータの取得に失敗しました")
+        logger.error(f"Dashboard data retrieval error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve dashboard data")
 
 
 @router.get("/lecture/{lecture_id}/performance")
 async def get_lecture_performance(lecture_id: int, db: Session = Depends(get_db)):
-    """特定講義のパフォーマンス分析"""
+    """Performance analysis for a specific lecture"""
     lecture = db.query(Lecture).filter(Lecture.id == lecture_id).first()
     if not lecture:
-        raise HTTPException(status_code=404, detail="講義が見つかりません")
+        raise HTTPException(status_code=404, detail="Lecture not found")
     
     try:
-        # 講義の質問一覧
+        # Get lecture questions
         questions = db.query(Question).filter(Question.lecture_id == lecture_id).all()
         
         if not questions:
             return {
                 "lecture_id": lecture_id,
                 "lecture_title": lecture.title,
-                "message": "この講義にはまだ質問がありません"
+                "message": "No questions available for this lecture yet"
             }
         
-        # 各質問の統計
+        # Statistics for each question
         question_stats = []
         for question in questions:
             responses = db.query(StudentResponse).filter(
@@ -133,7 +133,7 @@ async def get_lecture_performance(lecture_id: int, db: Session = Depends(get_db)
                     "average_response_time": round(avg_response_time, 1) if avg_response_time else None
                 })
         
-        # 講義全体の統計
+        # Overall lecture statistics
         all_responses = db.query(StudentResponse).join(Question).filter(
             Question.lecture_id == lecture_id
         ).all()
@@ -152,7 +152,7 @@ async def get_lecture_performance(lecture_id: int, db: Session = Depends(get_db)
                 (correct_responses / len(all_responses)) * 100, 1
             )
         
-        # 難易度別の内訳
+        # Breakdown by difficulty
         for difficulty in DifficultyLevel:
             diff_questions = [q for q in questions if q.difficulty == difficulty]
             if diff_questions:
@@ -168,7 +168,7 @@ async def get_lecture_performance(lecture_id: int, db: Session = Depends(get_db)
                         "correct_rate": round((correct_count / len(diff_responses)) * 100, 1)
                     }
         
-        # 質問タイプ別の内訳
+        # Breakdown by question type
         for q_type in QuestionType:
             type_questions = [q for q in questions if q.question_type == q_type]
             if type_questions:
@@ -192,15 +192,15 @@ async def get_lecture_performance(lecture_id: int, db: Session = Depends(get_db)
         }
         
     except Exception as e:
-        logger.error(f"講義パフォーマンス分析エラー: {e}")
-        raise HTTPException(status_code=500, detail="講義パフォーマンスの分析に失敗しました")
+        logger.error(f"Lecture performance analysis error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to analyze lecture performance")
 
 
 @router.get("/student/{student_id}/progress")
 async def get_student_progress(student_id: str, db: Session = Depends(get_db)):
-    """特定学生の進捗分析"""
+    """Progress analysis for a specific student"""
     try:
-        # 学生の全回答を取得
+        # Get all student responses
         responses = db.query(StudentResponse).filter(
             StudentResponse.student_id == student_id
         ).order_by(StudentResponse.submitted_at.desc()).all()
@@ -208,15 +208,15 @@ async def get_student_progress(student_id: str, db: Session = Depends(get_db)):
         if not responses:
             return {
                 "student_id": student_id,
-                "message": "この学生の回答記録がありません"
+                "message": "No response records for this student"
             }
         
-        # 基本統計
+        # Basic statistics
         total_responses = len(responses)
         correct_responses = sum(1 for r in responses if r.is_correct)
         overall_correct_rate = (correct_responses / total_responses) * 100
         
-        # 難易度別の成績
+        # Performance by difficulty
         difficulty_performance = {}
         for difficulty in DifficultyLevel:
             diff_responses = db.query(StudentResponse).join(Question).filter(
@@ -234,7 +234,7 @@ async def get_student_progress(student_id: str, db: Session = Depends(get_db)):
                     "correct_rate": round((correct_count / len(diff_responses)) * 100, 1)
                 }
         
-        # 質問タイプ別の成績
+        # Performance by question type
         type_performance = {}
         for q_type in QuestionType:
             type_responses = db.query(StudentResponse).join(Question).filter(
@@ -252,7 +252,7 @@ async def get_student_progress(student_id: str, db: Session = Depends(get_db)):
                     "correct_rate": round((correct_count / len(type_responses)) * 100, 1)
                 }
         
-        # 最近の活動（最新10問）
+        # Recent activity (latest 10 questions)
         recent_responses = responses[:10]
         recent_activity = []
         for response in recent_responses:
@@ -261,14 +261,14 @@ async def get_student_progress(student_id: str, db: Session = Depends(get_db)):
                 lecture = db.query(Lecture).filter(Lecture.id == question.lecture_id).first()
                 recent_activity.append({
                     "submitted_at": response.submitted_at.isoformat(),
-                    "lecture_title": lecture.title if lecture else "不明",
+                    "lecture_title": lecture.title if lecture else "Unknown",
                     "question_text": question.question_text[:100] + "..." if len(question.question_text) > 100 else question.question_text,
                     "difficulty": question.difficulty.value,
                     "is_correct": response.is_correct,
                     "response_time": response.response_time
                 })
         
-        # 学習傾向の分析
+        # Learning trends analysis
         learning_trends = _analyze_learning_trends(responses)
         
         return {
@@ -285,35 +285,35 @@ async def get_student_progress(student_id: str, db: Session = Depends(get_db)):
         }
         
     except Exception as e:
-        logger.error(f"学生進捗分析エラー: {e}")
-        raise HTTPException(status_code=500, detail="学生進捗の分析に失敗しました")
+        logger.error(f"Student progress analysis error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to analyze student progress")
 
 
 def _analyze_learning_trends(responses: List[StudentResponse]) -> Dict[str, Any]:
-    """学習傾向を分析"""
+    """Analyze learning trends"""
     if len(responses) < 5:
-        return {"message": "十分なデータがないため傾向分析できません"}
+        return {"message": "Insufficient data for trend analysis"}
     
-    # 時系列での正答率変化（最新20問）
+    # Correct rate changes over time (latest 20 questions)
     recent_responses = sorted(responses[:20], key=lambda x: x.submitted_at)
     correct_rates = []
     
     for i in range(0, len(recent_responses), 5):
         batch = recent_responses[i:i+5]
-        if len(batch) >= 3:  # 最低3問以上で計算
+        if len(batch) >= 3:  # Calculate with at least 3 questions
             correct_count = sum(1 for r in batch if r.is_correct)
             rate = (correct_count / len(batch)) * 100
             correct_rates.append(rate)
     
-    # 傾向の判定
-    trend = "安定"
+    # Trend determination
+    trend = "Stable"
     if len(correct_rates) >= 2:
         if correct_rates[-1] > correct_rates[0] + 10:
-            trend = "向上"
+            trend = "Improving"
         elif correct_rates[-1] < correct_rates[0] - 10:
-            trend = "低下"
+            trend = "Declining"
     
-    # 平均回答時間の分析
+    # Average response time analysis
     timed_responses = [r for r in responses if r.response_time]
     avg_response_time = None
     if timed_responses:
@@ -332,37 +332,37 @@ async def get_learning_recommendations(
     student_id: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    """学習改善の推奨事項を取得"""
+    """Get learning improvement recommendations"""
     try:
         recommendations = []
         
         if lecture_id:
-            # 講義別の推奨事項
+            # Lecture-specific recommendations
             lecture_recs = _get_lecture_recommendations(lecture_id, db)
             recommendations.extend(lecture_recs)
         
         if student_id:
-            # 学生別の推奨事項
+            # Student-specific recommendations
             student_recs = _get_student_recommendations(student_id, db)
             recommendations.extend(student_recs)
         
         if not lecture_id and not student_id:
-            # 全体的な推奨事項
+            # General recommendations
             general_recs = _get_general_recommendations(db)
             recommendations.extend(general_recs)
         
         return {"recommendations": recommendations}
         
     except Exception as e:
-        logger.error(f"推奨事項取得エラー: {e}")
-        raise HTTPException(status_code=500, detail="推奨事項の取得に失敗しました")
+        logger.error(f"Recommendations retrieval error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get recommendations")
 
 
 def _get_lecture_recommendations(lecture_id: int, db: Session) -> List[Dict[str, Any]]:
-    """講義別の推奨事項を生成"""
+    """Generate lecture-specific recommendations"""
     recommendations = []
     
-    # 低正答率の質問を特定
+    # Identify questions with low correct rates
     low_performance_questions = db.query(Question).filter(
         and_(
             Question.lecture_id == lecture_id,
@@ -375,12 +375,12 @@ def _get_lecture_recommendations(lecture_id: int, db: Session) -> List[Dict[str,
         recommendations.append({
             "type": "content_review",
             "priority": "high",
-            "title": "内容の見直しが必要な分野",
-            "description": f"{len(low_performance_questions)}問の正答率が50%を下回っています。該当するスライドの内容を見直すことを推奨します。",
+            "title": "Areas requiring content review",
+            "description": f"{len(low_performance_questions)} questions have correct rates below 50%. It is recommended to review the content of the relevant slides.",
             "action_items": [
-                "正答率の低い質問を確認",
-                "関連するスライドの内容を詳しく説明",
-                "追加の例題や練習問題を提供"
+                "Review questions with low correct rates",
+                "Provide detailed explanations for related slide content",
+                "Provide additional examples and practice problems"
             ]
         })
     
@@ -388,10 +388,10 @@ def _get_lecture_recommendations(lecture_id: int, db: Session) -> List[Dict[str,
 
 
 def _get_student_recommendations(student_id: str, db: Session) -> List[Dict[str, Any]]:
-    """学生別の推奨事項を生成"""
+    """Generate student-specific recommendations"""
     recommendations = []
     
-    # 学生の弱点分析
+    # Student weakness analysis
     weak_difficulties = db.query(
         Question.difficulty,
         func.avg(func.cast(StudentResponse.is_correct, func.Integer)).label('avg_correct')
@@ -406,12 +406,12 @@ def _get_student_recommendations(student_id: str, db: Session) -> List[Dict[str,
         recommendations.append({
             "type": "skill_improvement",
             "priority": "medium",
-            "title": "強化が必要な難易度レベル",
-            "description": f"以下の難易度で苦戦しています: {', '.join(difficulty_names)}",
+            "title": "Difficulty levels requiring reinforcement",
+            "description": f"Struggling with the following difficulty levels: {', '.join(difficulty_names)}",
             "action_items": [
-                "基礎概念の復習",
-                "段階的な難易度アップの練習",
-                "関連する参考資料の確認"
+                "Review basic concepts",
+                "Practice with gradual difficulty increases",
+                "Check related reference materials"
             ]
         })
     
@@ -419,10 +419,10 @@ def _get_student_recommendations(student_id: str, db: Session) -> List[Dict[str,
 
 
 def _get_general_recommendations(db: Session) -> List[Dict[str, Any]]:
-    """全体的な推奨事項を生成"""
+    """Generate general recommendations"""
     recommendations = []
     
-    # 全体的な傾向分析
+    # Overall trend analysis
     avg_correct_rate = db.query(func.avg(Question.correct_rate)).filter(
         Question.correct_rate.isnot(None)
     ).scalar()
@@ -431,12 +431,12 @@ def _get_general_recommendations(db: Session) -> List[Dict[str, Any]]:
         recommendations.append({
             "type": "general_improvement",
             "priority": "high",
-            "title": "全体的な理解度向上が必要",
-            "description": f"全体の平均正答率が{avg_correct_rate:.1f}%と低めです。",
+            "title": "Overall understanding improvement needed",
+            "description": f"The overall average correct rate is low at {avg_correct_rate:.1f}%.",
             "action_items": [
-                "基礎概念の強化",
-                "質問の難易度調整",
-                "追加の説明資料の提供"
+                "Strengthen basic concepts",
+                "Adjust question difficulty levels",
+                "Provide additional explanatory materials"
             ]
         })
     

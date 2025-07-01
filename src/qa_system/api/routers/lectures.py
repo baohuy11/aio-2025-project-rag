@@ -28,7 +28,7 @@ async def get_lectures(
     limit: int = 100,
     db: Session = Depends(get_db)
 ):
-    """Get list of lectures"""
+    """Get lecture list"""
     lectures = db.query(Lecture).offset(skip).limit(limit).all()
     return [lecture.to_dict() for lecture in lectures]
 
@@ -52,7 +52,7 @@ async def upload_lecture(
     subject: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
-    """Upload a PowerPoint file and create a lecture"""
+    """Upload PowerPoint file and create lecture"""
     
     # Check file extension
     if not file.filename.lower().endswith(('.pptx', '.ppt')):
@@ -94,7 +94,7 @@ async def upload_lecture(
         db.commit()
         db.refresh(lecture)
         
-        # Run content extraction and QA generation in background
+        # Execute content extraction and QA generation in background
         background_tasks.add_task(
             process_lecture_content,
             lecture.id,
@@ -104,7 +104,7 @@ async def upload_lecture(
         logger.info(f"Lecture uploaded: {lecture.id}")
         
         return {
-            "message": "Lecture uploaded. Content extraction and QA generation will start.",
+            "message": "Lecture uploaded. Starting content extraction and QA generation.",
             "lecture_id": lecture.id
         }
         
@@ -139,18 +139,18 @@ async def process_lecture_content(lecture_id: int, file_path: str):
             ensure_ascii=False
         )
         
-        # QA generation
+        # Generate QA
         if settings.google_api_key:
             qa_generator = QAGenerator(settings.google_api_key, settings.gemini_model)
             
-            # Generate QA for each slide (limit max number for performance)
+            # Generate QA for each slide (limit number to reduce processing load)
             slides_data = [slide.to_dict() for slide in slides_content[:settings.max_slides_for_qa]]
             qa_sets = qa_generator.generate_questions_for_multiple_slides(
                 slides_data, 
                 questions_per_slide=settings.qa_per_slide
             )
             
-            logger.info(f"QA generation target: {len(slides_data)} slides (out of {len(slides_content)})")
+            logger.info(f"QA generation target: {len(slides_data)} slides (out of {len(slides_content)} total slides)")
             
             # Save questions to database
             for qa_set in qa_sets:
@@ -192,7 +192,7 @@ async def process_lecture_content(lecture_id: int, file_path: str):
 
 @router.delete("/{lecture_id}")
 async def delete_lecture(lecture_id: int, db: Session = Depends(get_db)):
-    """Delete a lecture"""
+    """Delete lecture"""
     lecture = db.query(Lecture).filter(Lecture.id == lecture_id).first()
     if not lecture:
         raise HTTPException(status_code=404, detail="Lecture not found")
@@ -203,7 +203,7 @@ async def delete_lecture(lecture_id: int, db: Session = Depends(get_db)):
         if file_path.exists():
             file_path.unlink()
         
-        # Delete from database (related questions are also deleted automatically)
+        # Delete from database (related questions will be automatically deleted)
         db.delete(lecture)
         db.commit()
         
@@ -223,7 +223,7 @@ async def get_lecture_questions(
     question_type: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    """Get list of questions for a specific lecture"""
+    """Get question list for a specific lecture"""
     lecture = db.query(Lecture).filter(Lecture.id == lecture_id).first()
     if not lecture:
         raise HTTPException(status_code=404, detail="Lecture not found")
@@ -248,11 +248,14 @@ async def get_lecture_slides(lecture_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Lecture not found")
     
     if not lecture.extracted_content:
-        return {"slides": []}
+        raise HTTPException(status_code=404, detail="Slide content not extracted yet")
     
     try:
-        slides = json.loads(lecture.extracted_content)
-        return {"slides": slides}
-    except Exception as e:
-        logger.error(f"Failed to load slides: {e}")
-        raise HTTPException(status_code=500, detail="Failed to load slides")
+        slides_data = json.loads(lecture.extracted_content)
+        return {
+            # "lecture_id": lecture_id,
+            # "total_slides": lecture.total_slides,
+            "slides": slides_data
+        }
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="Failed to parse slide content")

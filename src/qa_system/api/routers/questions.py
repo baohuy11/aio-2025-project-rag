@@ -27,7 +27,7 @@ async def get_questions(
     question_type: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    """質問一覧を取得"""
+    """Get question list"""
     query = db.query(Question)
     
     if lecture_id:
@@ -37,13 +37,13 @@ async def get_questions(
         try:
             query = query.filter(Question.difficulty == DifficultyLevel(difficulty))
         except ValueError:
-            raise HTTPException(status_code=400, detail="無効な難易度です")
+            raise HTTPException(status_code=400, detail="Invalid difficulty level")
     
     if question_type:
         try:
             query = query.filter(Question.question_type == QuestionType(question_type))
         except ValueError:
-            raise HTTPException(status_code=400, detail="無効な質問タイプです")
+            raise HTTPException(status_code=400, detail="Invalid question type")
     
     questions = query.offset(skip).limit(limit).all()
     return [question.to_dict() for question in questions]
@@ -51,14 +51,14 @@ async def get_questions(
 
 @router.get("/{question_id}", response_model=dict)
 async def get_question(question_id: int, db: Session = Depends(get_db)):
-    """特定の質問を取得"""
+    """Get a specific question"""
     question = db.query(Question).filter(Question.id == question_id).first()
     if not question:
-        raise HTTPException(status_code=404, detail="質問が見つかりません")
+        raise HTTPException(status_code=404, detail="Question not found")
     
     question_dict = question.to_dict()
     
-    # 講義情報も含める
+    # Include lecture information
     lecture = db.query(Lecture).filter(Lecture.id == question.lecture_id).first()
     if lecture:
         question_dict["lecture"] = {"id": lecture.id, "title": lecture.title}
@@ -74,10 +74,10 @@ async def update_question(
     explanation: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
-    """質問を更新"""
+    """Update question"""
     question = db.query(Question).filter(Question.id == question_id).first()
     if not question:
-        raise HTTPException(status_code=404, detail="質問が見つかりません")
+        raise HTTPException(status_code=404, detail="Question not found")
     
     try:
         question.question_text = question_text
@@ -88,35 +88,35 @@ async def update_question(
         db.commit()
         db.refresh(question)
         
-        logger.info(f"質問が更新されました: {question_id}")
+        logger.info(f"Question updated: {question_id}")
         
-        return {"message": "質問が更新されました", "question": question.to_dict()}
+        return {"message": "Question updated", "question": question.to_dict()}
         
     except Exception as e:
-        logger.error(f"質問更新エラー: {e}")
+        logger.error(f"Question update error: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"質問の更新に失敗しました: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to update question: {str(e)}")
 
 
 @router.delete("/{question_id}")
 async def delete_question(question_id: int, db: Session = Depends(get_db)):
-    """質問を削除"""
+    """Delete question"""
     question = db.query(Question).filter(Question.id == question_id).first()
     if not question:
-        raise HTTPException(status_code=404, detail="質問が見つかりません")
+        raise HTTPException(status_code=404, detail="Question not found")
     
     try:
         db.delete(question)
         db.commit()
         
-        logger.info(f"質問が削除されました: {question_id}")
+        logger.info(f"Question deleted: {question_id}")
         
-        return {"message": "質問が削除されました"}
+        return {"message": "Question deleted"}
         
     except Exception as e:
-        logger.error(f"質問削除エラー: {e}")
+        logger.error(f"Question deletion error: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"質問の削除に失敗しました: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete question: {str(e)}")
 
 
 @router.post("/{question_id}/answer")
@@ -128,19 +128,19 @@ async def submit_answer(
     confidence_level: Optional[int] = Form(None),
     db: Session = Depends(get_db)
 ):
-    """学生の回答を提出"""
+    """Submit student answer"""
     question = db.query(Question).filter(Question.id == question_id).first()
     if not question:
-        raise HTTPException(status_code=404, detail="質問が見つかりません")
+        raise HTTPException(status_code=404, detail="Question not found")
     
     try:
-        # 正解かどうかを判定
+        # Evaluate if answer is correct
         is_correct = _evaluate_answer(question, response_text)
         
-        # 得点を計算
+        # Calculate score
         score = 100.0 if is_correct else 0.0
         
-        # 学生の回答を記録
+        # Record student response
         student_response = StudentResponse(
             question_id=question_id,
             student_id=student_id,
@@ -153,66 +153,66 @@ async def submit_answer(
         
         db.add(student_response)
         
-        # 質問の使用回数を更新
+        # Update question usage count
         question.usage_count += 1
         
-        # 正答率を更新
+        # Update correct answer rate
         _update_correct_rate(question, db)
         
         db.commit()
         db.refresh(student_response)
         
-        logger.info(f"学生回答が記録されました: 質問 {question_id}, 学生 {student_id}")
+        logger.info(f"Student response recorded: Question {question_id}, Student {student_id}")
         
         return {
-            "message": "回答が記録されました",
+            "message": "Answer recorded",
             "is_correct": is_correct,
             "score": score,
             "explanation": question.explanation
         }
         
     except Exception as e:
-        logger.error(f"回答記録エラー: {e}")
+        logger.error(f"Answer recording error: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"回答の記録に失敗しました: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to record answer: {str(e)}")
 
 
 def _evaluate_answer(question: Question, response_text: str) -> bool:
-    """回答を評価"""
+    """Evaluate answer"""
     if question.question_type in [QuestionType.MULTIPLE_CHOICE, QuestionType.SINGLE_CHOICE]:
-        # 選択式の場合、正解と完全一致で判定
+        # For multiple choice, check exact match
         return response_text.strip().lower() == question.correct_answer.strip().lower()
     
     elif question.question_type == QuestionType.SHORT_ANSWER:
-        # 短答式の場合、部分一致で判定
+        # For short answer, check partial match
         correct_answer = question.correct_answer.strip().lower()
         student_answer = response_text.strip().lower()
         
-        # キーワードベースの評価
+        # Keyword-based evaluation
         if question.keywords:
             keywords = [kw.lower() for kw in question.get_keywords_list()]
             matches = sum(1 for kw in keywords if kw in student_answer)
-            return matches >= len(keywords) * 0.5  # 半分以上のキーワードが含まれている
+            return matches >= len(keywords) * 0.5  # At least half of keywords included
         
-        # 正解との類似度評価（簡単な実装）
+        # Similarity evaluation with correct answer (simple implementation)
         return correct_answer in student_answer or student_answer in correct_answer
     
     else:  # ESSAY
-        # 記述式の場合、簡単なキーワードマッチング
+        # For essay, simple keyword matching
         if question.keywords:
             keywords = [kw.lower() for kw in question.get_keywords_list()]
             student_answer = response_text.strip().lower()
             matches = sum(1 for kw in keywords if kw in student_answer)
-            return matches >= max(1, len(keywords) * 0.3)  # 最低30%のキーワードが含まれている
+            return matches >= max(1, len(keywords) * 0.3)  # At least 30% of keywords included
         
-        # キーワードがない場合は中立的な評価
-        return len(response_text.strip()) >= 50  # 最低50文字以上の回答
+        # If no keywords, neutral evaluation
+        return len(response_text.strip()) >= 50  # At least 50 characters
 
 
 def _update_correct_rate(question: Question, db: Session):
-    """質問の正答率を更新"""
+    """Update question correct answer rate"""
     try:
-        # この質問のすべての回答を取得
+        # Get all responses for this question
         responses = db.query(StudentResponse).filter(
             StudentResponse.question_id == question.id,
             StudentResponse.is_correct.isnot(None)
@@ -226,33 +226,37 @@ def _update_correct_rate(question: Question, db: Session):
             question.correct_rate = correct_rate
             
     except Exception as e:
-        logger.error(f"正答率更新エラー: {e}")
+        logger.error(f"Correct rate update error: {e}")
 
 
 @router.get("/statistics/overview")
 async def get_statistics_overview(db: Session = Depends(get_db)):
-    """質問統計の概要を取得"""
+    """Get question statistics overview"""
     try:
-        # 総質問数
+        # Total questions
         total_questions = db.query(Question).count()
         
-        # 難易度別の質問数
+        # Questions by difficulty
         difficulty_stats = db.query(
             Question.difficulty,
             func.count(Question.id)
         ).group_by(Question.difficulty).all()
         
-        # 質問タイプ別の質問数
+        # Questions by type
         type_stats = db.query(
             Question.question_type,
             func.count(Question.id)
         ).group_by(Question.question_type).all()
         
-        # 総回答数
-        total_responses = db.query(StudentResponse).count()
-        
-        # 平均正答率
+        # Average correct rate
         avg_correct_rate = db.query(func.avg(Question.correct_rate)).scalar()
+
+        # avg_correct_rate = db.query(func.avg(Question.correct_rate)).filter(
+            # Question.correct_rate.isnot(None)
+        # ).scalar()
+        
+        # Total responses
+        total_responses = db.query(StudentResponse).count()
         
         return {
             "total_questions": total_questions,
@@ -267,8 +271,8 @@ async def get_statistics_overview(db: Session = Depends(get_db)):
         }
         
     except Exception as e:
-        logger.error(f"統計取得エラー: {e}")
-        raise HTTPException(status_code=500, detail="統計の取得に失敗しました")
+        logger.error(f"Statistics overview error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get statistics overview")
 
 
 @router.get("/{question_id}/responses", response_model=List[dict])
@@ -278,10 +282,10 @@ async def get_question_responses(
     limit: int = 100,
     db: Session = Depends(get_db)
 ):
-    """特定の質問への回答一覧を取得"""
+    """Get responses for a specific question"""
     question = db.query(Question).filter(Question.id == question_id).first()
     if not question:
-        raise HTTPException(status_code=404, detail="質問が見つかりません")
+        raise HTTPException(status_code=404, detail="Question not found")
     
     responses = db.query(StudentResponse).filter(
         StudentResponse.question_id == question_id
